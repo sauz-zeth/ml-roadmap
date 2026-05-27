@@ -557,6 +557,7 @@ function App() {
   const [quizOpen,  setQuizOpen]  = useState(false);
   const [animPhase, setAnimPhase] = useState(null);
   const [animLevel, setAnimLevel] = useState(-1);
+  const [zoom, setZoom] = useState(1);
 
   const viewportRef = useRef(null);
   const initialScrolled = useRef(false);
@@ -673,15 +674,16 @@ function App() {
     if (!vp) return;
     const node = NODE_BY_ID[nodeId];
     if (!node) return;
-    const mapLeftOffset = (vp.clientWidth - LAYOUT.CANVAS_W) / 2;
-    const targetX = node.x + Math.max(0, mapLeftOffset) - vp.clientWidth / 2;
-    const targetY = node.y - vp.clientHeight / 2;
+    const z = zoom;
+    const mapLeftOffset = (vp.clientWidth - LAYOUT.CANVAS_W * z) / 2;
+    const targetX = node.x * z + Math.max(0, mapLeftOffset) - vp.clientWidth / 2;
+    const targetY = node.y * z - vp.clientHeight / 2;
     vp.scrollTo({
       left: Math.max(0, Math.min(targetX, vp.scrollWidth  - vp.clientWidth)),
       top:  Math.max(0, Math.min(targetY, vp.scrollHeight - vp.clientHeight)),
       behavior: smooth ? 'smooth' : 'auto',
     });
-  }, []);
+  }, [zoom]);
 
   useLayoutEffect(() => {
     if (initialScrolled.current) return;
@@ -701,18 +703,28 @@ function App() {
     const onKey = (e) => {
       const tag = e.target.tagName;
       if (tag === 'INPUT' || tag === 'TEXTAREA' || quizOpen) return;
-      if ((e.key === 'r' || e.key === 'R') && !animPhase) {
+      if ((e.key === 'r' || e.key === 'R' || e.code === 'KeyR') && e.ctrlKey && e.shiftKey) {
+        e.preventDefault();
+        handleReset();
+        return;
+      }
+      if ((e.key === 'r' || e.key === 'R' || e.code === 'KeyR') && !animPhase) {
         setAnimPhase('building'); setAnimLevel(-1);
         return;
       }
       if (animPhase) return;
+      if ((e.key === 't' || e.key === 'T' || e.code === 'KeyT') && e.ctrlKey) {
+        e.preventDefault();
+        if (canCompleteCur) handleComplete();
+        return;
+      }
       if ((e.key === ' ' || e.key === 'Enter') && canCompleteCur) {
         e.preventDefault();
         handleComplete();
       }
-      if (e.key === 'g' || e.key === 'G') scrollToNode(GOAL_ID, true);
-      if (e.key === 's' || e.key === 'S') scrollToNode(START_ID, true);
-      if (e.key === 'h' || e.key === 'H') scrollToNode(current, true);
+      if (e.key === 'g' || e.key === 'G' || e.code === 'KeyG') scrollToNode(GOAL_ID, true);
+      if (e.key === 's' || e.key === 'S' || e.code === 'KeyS') scrollToNode(START_ID, true);
+      if (e.key === 'h' || e.key === 'H' || e.code === 'KeyH') scrollToNode(current, true);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
@@ -735,10 +747,11 @@ function App() {
     const vp = viewportRef.current;
     if (!vp) return;
 
-    // Scroll targets: center viewport on each level's Y
+    // Scroll targets: center viewport on each level's Y (account for zoom)
+    const z = zoom;
     const halfH = vp.clientHeight / 2;
     const maxScroll = vp.scrollHeight - vp.clientHeight;
-    const targets = ANIM_LEVELS.map(l => Math.max(0, Math.min(maxScroll, l.y - halfH)));
+    const targets = ANIM_LEVELS.map(l => Math.max(0, Math.min(maxScroll, l.y * z - halfH)));
 
     const startScroll = targets[0];
     const endScroll = targets[targets.length - 1];
@@ -794,7 +807,7 @@ function App() {
           setAnimPhase('done');
           const startNode = NODE_BY_ID[START_ID];
           if (vp && startNode) {
-            const targetY = Math.max(0, Math.min(startNode.y - halfH, maxScroll));
+            const targetY = Math.max(0, Math.min(startNode.y * z - halfH, maxScroll));
             const fromY = vp.scrollTop;
             const dist = Math.abs(targetY - fromY);
             const dur = Math.max(1500, Math.min(2000, dist / 0.35));
@@ -821,7 +834,7 @@ function App() {
 
     animFrameRef.current = requestAnimationFrame(step);
     return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-  }, [animPhase, scrollToNode]);
+  }, [animPhase, scrollToNode, zoom]);
 
   /* Mouse drag panning */
   useEffect(() => {
@@ -851,6 +864,22 @@ function App() {
     };
   }, []);
 
+  /* Ctrl+wheel zoom */
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    const onWheel = (e) => {
+      if (!e.ctrlKey && !e.metaKey) return;
+      e.preventDefault();
+      setZoom(z => {
+        const next = z - e.deltaY * 0.002;
+        return Math.max(0.3, Math.min(1, Math.round(next * 20) / 20));
+      });
+    };
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    return () => vp.removeEventListener('wheel', onWheel);
+  }, []);
+
   const progress = completed.size;
   const total = NODES.length;
   const pct = (progress / total) * 100;
@@ -870,7 +899,7 @@ function App() {
     <React.Fragment>
       {/* Scrollable map */}
       <div className="viewport" ref={viewportRef}>
-        <div className="map" style={{ width: LAYOUT.CANVAS_W, height: LAYOUT.CANVAS_H }}>
+        <div className="map" style={zoom < 1 ? { width: LAYOUT.CANVAS_W, height: LAYOUT.CANVAS_H, transform: `scale(${zoom})`, transformOrigin: 'top center', marginBottom: (zoom - 1) * LAYOUT.CANVAS_H } : { width: LAYOUT.CANVAS_W, height: LAYOUT.CANVAS_H }}>
 
           {/* Edges */}
           <svg
@@ -891,7 +920,7 @@ function App() {
               const a = NODE_BY_ID[aId];
               const b = NODE_BY_ID[bId];
               if (!a || !b) return null;
-              if (revealedNodes && (!revealedNodes.has(aId) || !revealedNodes.has(bId))) return null;
+              const edgeRevealed = !revealedNodes || (revealedNodes.has(aId) && revealedNodes.has(bId));
               const bothDone = completed.has(aId) && completed.has(bId);
               const oneUnlocked = reachable.has(aId) || reachable.has(bId);
               const path = t.edgeStyle === 'straight' ? straightEdgePath(a, b) : smartEdgePath(a, b, NODES);
@@ -900,7 +929,7 @@ function App() {
                 : (oneUnlocked ? 'rgba(255,255,255,0.18)' : 'rgba(255,255,255,0.06)');
               const width = bothDone ? 2.5 : 1.3;
               return (
-                <g key={`${aId}-${bId}`}>
+                <g key={`${aId}-${bId}`} style={{ opacity: edgeRevealed ? 1 : 0, transition: 'opacity 0.6s ease' }}>
                   {bothDone && (
                     <path d={path} stroke="#30D158" strokeWidth="7"
                           fill="none" strokeLinecap="round" opacity="0.18"
@@ -965,10 +994,6 @@ function App() {
             </div>
           </div>
           <div className="topbar-actions">
-            <button className="icon-btn" onClick={handleReset}>
-              <ResetIcon />
-              Reset
-            </button>
           </div>
         </div>
       </div>
@@ -991,7 +1016,7 @@ function App() {
         )}
         {currentNode.type === 'gate' && currentNode.kind === 'test' && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
-            <div style={{ fontSize: 10.5, letterSpacing: '0.14em', color: 'var(--text-faint)', textTransform: 'uppercase', fontWeight: 600 }}>Difficulty</div>
+            <div style={{ fontSize: 10.5, letterSpacing: '0.14em', color: 'var(--text-faint)', textTransform: 'uppercase', fontWeight: 600 }}>Reward</div>
             <StarsRow difficulty={currentNode.difficulty} glow={isCurDone} size={12} />
           </div>
         )}
@@ -1050,6 +1075,14 @@ function App() {
         </button>
         <button className="icon-btn" onClick={() => scrollToNode(START_ID, true)} title="To start (S)">
           ↓ To start
+        </button>
+        <div className="zoom-divider" />
+        <button className="icon-btn" onClick={() => setZoom(z => Math.min(1, +(z + 0.1).toFixed(1)))} title="Zoom in" disabled={zoom >= 1}>
+          +
+        </button>
+        <button className="icon-btn zoom-level" disabled>{Math.round(zoom * 100)}%</button>
+        <button className="icon-btn" onClick={() => setZoom(z => Math.max(0.3, +(z - 0.1).toFixed(1)))} title="Zoom out" disabled={zoom <= 0.3}>
+          −
         </button>
       </div>
 
