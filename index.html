@@ -44,13 +44,20 @@
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
   }
-  /* Neutral dark gray gradient — no color tint */
+  /* Neutral dark gray gradient — no color tint, with dither to prevent banding */
   .ambient {
     position: fixed; inset: 0; pointer-events: none; z-index: 0;
     background:
       radial-gradient(1200px 800px at 50% 0%, rgba(255, 255, 255, 0.025), transparent 60%),
       radial-gradient(1000px 800px at 50% 100%, rgba(255, 255, 255, 0.018), transparent 60%),
       linear-gradient(180deg, #16161a 0%, #0e0e10 100%);
+  }
+  .ambient::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='200'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+    opacity: 1;
+    mix-blend-mode: overlay;
   }
 
   /* ───────── Scrollable map viewport ───────── */
@@ -739,6 +746,54 @@
     pointer-events: none !important;
     transition: opacity 0.8s ease;
   }
+  /* During animation: all nodes monochrome */
+  body.anim-active .node {
+    --c: rgba(255, 255, 255, 0.45) !important;
+    --c-soft: rgba(255, 255, 255, 0.15) !important;
+  }
+  body.anim-active .node .gate-title,
+  body.anim-active .node .gate-sub {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+  body.anim-active .node .node-label {
+    color: rgba(255, 255, 255, 0.5) !important;
+  }
+  body.anim-active .node.completed .shape {
+    background: rgba(255, 255, 255, 0.12) !important;
+    border-color: rgba(255, 255, 255, 0.45) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 3px 10px rgba(0,0,0,0.5) !important;
+  }
+  body.anim-active .node.completed .gate-title,
+  body.anim-active .node.completed .gate-sub {
+    color: rgba(255, 255, 255, 0.7) !important;
+  }
+  body.anim-active .node.completed .node-label {
+    color: rgba(255, 255, 255, 0.5) !important;
+  }
+  body.anim-active .node.tier-topic.completed .shape .check-mark {
+    color: rgba(255, 255, 255, 0.8) !important;
+  }
+  body.anim-active .node.current .shape {
+    transform: scale(1) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 3px 10px rgba(0,0,0,0.5) !important;
+  }
+  body.anim-active .node.locked .shape {
+    background: rgba(255, 255, 255, 0.03) !important;
+  }
+  body.anim-active .node.locked .gate-title,
+  body.anim-active .node.locked .gate-sub,
+  body.anim-active .node.locked .node-label {
+    color: rgba(255, 255, 255, 0.3) !important;
+  }
+  body.anim-active .edges-layer path {
+    stroke: rgba(255, 255, 255, 0.12) !important;
+    filter: none !important;
+  }
+  body.anim-active .stars-row,
+  body.anim-active .star-gate-badge {
+    opacity: 0 !important;
+  }
+
   .node.anim-hidden {
     opacity: 0 !important;
     filter: blur(6px);
