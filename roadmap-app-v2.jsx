@@ -557,7 +557,21 @@ function App() {
   const [quizOpen,  setQuizOpen]  = useState(false);
   const [animPhase, setAnimPhase] = useState(null);
   const [animLevel, setAnimLevel] = useState(-1);
-  const [zoom, setZoom] = useState(1);
+  const [zoom, setZoom] = useState(() => window.innerWidth < 768 ? 0.45 : 1);
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
+  const [sheetMode, setSheetMode] = useState('peek'); // 'collapsed' | 'peek' | 'expanded'
+  const [legendOpen, setLegendOpen] = useState(false);
+  const zoomRef = useRef(zoom);
+  const sheetRef = useRef(null);
+
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+
+  useEffect(() => {
+    const mql = window.matchMedia('(max-width: 767px)');
+    const handler = (e) => setIsMobile(e.matches);
+    mql.addEventListener('change', handler);
+    return () => mql.removeEventListener('change', handler);
+  }, []);
 
   const viewportRef = useRef(null);
   const initialScrolled = useRef(false);
@@ -649,7 +663,8 @@ function App() {
     if (animPhase) return;
     if (!reachable.has(nodeId)) return;
     setCurrent(nodeId);
-  }, [reachable, animPhase]);
+    if (isMobile) setSheetMode('peek');
+  }, [reachable, animPhase, isMobile]);
 
   const handleComplete = useCallback(() => {
     if (!canCompleteCur) return;
@@ -675,15 +690,21 @@ function App() {
     const node = NODE_BY_ID[nodeId];
     if (!node) return;
     const z = zoom;
-    const mapLeftOffset = (vp.clientWidth - LAYOUT.CANVAS_W * z) / 2;
-    const targetX = node.x * z + Math.max(0, mapLeftOffset) - vp.clientWidth / 2;
-    const targetY = node.y * z - vp.clientHeight / 2;
+    /* The .map div has margin:0 auto and transform-origin:top center.
+       With scale(z), the visual center of the canvas stays at the layout center.
+       Node visual position = layoutCenterX + (node.x - CANVAS_W/2) * z */
+    const mapEl = vp.querySelector('.map');
+    const layoutLeft = mapEl ? mapEl.offsetLeft : (vp.scrollWidth - LAYOUT.CANVAS_W) / 2;
+    const visualX = layoutLeft + LAYOUT.CANVAS_W / 2 + (node.x - LAYOUT.CANVAS_W / 2) * z;
+    const visualY = node.y * z;
+    /* On mobile, shift center upward so the node sits above the bottom sheet */
+    const sheetOffset = isMobile ? vp.clientHeight * 0.2 : 0;
     vp.scrollTo({
-      left: Math.max(0, Math.min(targetX, vp.scrollWidth  - vp.clientWidth)),
-      top:  Math.max(0, Math.min(targetY, vp.scrollHeight - vp.clientHeight)),
+      left: Math.max(0, Math.min(visualX - vp.clientWidth / 2, vp.scrollWidth  - vp.clientWidth)),
+      top:  Math.max(0, Math.min(visualY - vp.clientHeight / 2 + sheetOffset, vp.scrollHeight - vp.clientHeight)),
       behavior: smooth ? 'smooth' : 'auto',
     });
-  }, [zoom]);
+  }, [zoom, isMobile]);
 
   useLayoutEffect(() => {
     if (initialScrolled.current) return;
@@ -864,17 +885,171 @@ function App() {
     };
   }, []);
 
-  /* Ctrl+wheel zoom */
+  /* Touch drag panning */
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    let dragging = false; let sx = 0; let sy = 0; let sl = 0; let st = 0;
+    const skip = (el) => el.closest('.node') || el.closest('.glass') ||
+      el.closest('.sidepanel') || el.closest('.legend') ||
+      el.closest('.map-controls') || el.closest('.twk-panel') || el.closest('.sheet-handle');
+    const onStart = (e) => {
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+      if (skip(t.target)) return;
+      dragging = true;
+      sx = t.clientX; sy = t.clientY; sl = vp.scrollLeft; st = vp.scrollTop;
+    };
+    const onMove = (e) => {
+      if (!dragging || e.touches.length !== 1) { dragging = false; return; }
+      e.preventDefault();
+      const t = e.touches[0];
+      vp.scrollLeft = sl - (t.clientX - sx);
+      vp.scrollTop  = st - (t.clientY - sy);
+    };
+    const onEnd = () => { dragging = false; };
+    vp.addEventListener('touchstart', onStart, { passive: true });
+    vp.addEventListener('touchmove', onMove, { passive: false });
+    vp.addEventListener('touchend', onEnd);
+    return () => {
+      vp.removeEventListener('touchstart', onStart);
+      vp.removeEventListener('touchmove', onMove);
+      vp.removeEventListener('touchend', onEnd);
+    };
+  }, []);
+
+  /* Pinch-to-zoom (anchored to pinch midpoint) */
+  useEffect(() => {
+    const vp = viewportRef.current;
+    if (!vp) return;
+    let pinching = false;
+    let startDist = 0;
+    let startZoom = 1;
+    let startScrollX = 0, startScrollY = 0;
+    let anchorX = 0, anchorY = 0; // pinch midpoint in document coords
+
+    const getDist = (ts) => {
+      const dx = ts[0].clientX - ts[1].clientX;
+      const dy = ts[0].clientY - ts[1].clientY;
+      return Math.sqrt(dx * dx + dy * dy);
+    };
+    const getMid = (ts) => ({
+      x: (ts[0].clientX + ts[1].clientX) / 2,
+      y: (ts[0].clientY + ts[1].clientY) / 2,
+    });
+
+    const onStart = (e) => {
+      if (e.touches.length === 2) {
+        pinching = true;
+        startDist = getDist(e.touches);
+        startZoom = zoomRef.current;
+        startScrollX = vp.scrollLeft;
+        startScrollY = vp.scrollTop;
+        const mid = getMid(e.touches);
+        // Pinch midpoint in content coordinates
+        anchorX = startScrollX + mid.x;
+        anchorY = startScrollY + mid.y;
+      }
+    };
+    const onMove = (e) => {
+      if (!pinching || e.touches.length !== 2) return;
+      e.preventDefault();
+      const dist = getDist(e.touches);
+      const ratio = dist / startDist;
+      const newZoom = Math.max(0.2, Math.min(1, startZoom * ratio));
+
+      // Apply zoom
+      zoomRef.current = newZoom;
+      setZoom(newZoom);
+
+      // Adjust scroll so the anchor point stays under the pinch midpoint
+      const zoomChange = newZoom / startZoom;
+      const mid = getMid(e.touches);
+      vp.scrollLeft = anchorX * zoomChange - mid.x;
+      vp.scrollTop  = anchorY * zoomChange - mid.y;
+    };
+    const onEnd = (e) => {
+      if (e.touches.length < 2) pinching = false;
+    };
+
+    vp.addEventListener('touchstart', onStart, { passive: true });
+    vp.addEventListener('touchmove', onMove, { passive: false });
+    vp.addEventListener('touchend', onEnd);
+    return () => {
+      vp.removeEventListener('touchstart', onStart);
+      vp.removeEventListener('touchmove', onMove);
+      vp.removeEventListener('touchend', onEnd);
+    };
+  }, []);
+
+  /* Bottom sheet drag */
+  useEffect(() => {
+    const sheet = sheetRef.current;
+    if (!sheet || !isMobile) return;
+    let startY = 0; let startH = 0; let dragging = false;
+    const handle = sheet.querySelector('.sheet-handle');
+    if (!handle) return;
+    const snapHeights = { collapsed: 72, peek: window.innerHeight * 0.4, expanded: window.innerHeight * 0.85 };
+    const onStart = (e) => {
+      if (e.touches.length !== 1) return;
+      dragging = true;
+      startY = e.touches[0].clientY;
+      startH = sheet.offsetHeight;
+      sheet.style.transition = 'none';
+    };
+    const onMove = (e) => {
+      if (!dragging) return;
+      e.preventDefault();
+      const dy = startY - e.touches[0].clientY;
+      const newH = Math.max(snapHeights.collapsed, Math.min(snapHeights.expanded, startH + dy));
+      sheet.style.height = newH + 'px';
+    };
+    const onEnd = () => {
+      if (!dragging) return;
+      dragging = false;
+      sheet.style.transition = '';
+      const h = sheet.offsetHeight;
+      const mid1 = (snapHeights.collapsed + snapHeights.peek) / 2;
+      const mid2 = (snapHeights.peek + snapHeights.expanded) / 2;
+      if (h < mid1) { setSheetMode('collapsed'); sheet.style.height = ''; }
+      else if (h < mid2) { setSheetMode('peek'); sheet.style.height = ''; }
+      else { setSheetMode('expanded'); sheet.style.height = ''; }
+    };
+    handle.addEventListener('touchstart', onStart, { passive: true });
+    handle.addEventListener('touchmove', onMove, { passive: false });
+    handle.addEventListener('touchend', onEnd);
+    return () => {
+      handle.removeEventListener('touchstart', onStart);
+      handle.removeEventListener('touchmove', onMove);
+      handle.removeEventListener('touchend', onEnd);
+    };
+  }, [isMobile]);
+
+  /* Wheel / trackpad-pinch zoom (anchored to cursor) */
   useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
     const onWheel = (e) => {
-      if (!e.ctrlKey && !e.metaKey) return;
+      /* Trackpad pinch sends wheel with ctrlKey; regular scroll is vertical navigation.
+         Accept both: ctrlKey (pinch) uses deltaY, plain wheel uses deltaY with smaller factor. */
+      const isPinch = e.ctrlKey || e.metaKey;
+      const delta = isPinch ? e.deltaY * 0.005 : e.deltaY * 0.001;
       e.preventDefault();
-      setZoom(z => {
-        const next = z - e.deltaY * 0.002;
-        return Math.max(0.3, Math.min(1, Math.round(next * 20) / 20));
-      });
+
+      const oldZoom = zoomRef.current;
+      const newZoom = Math.max(0.2, Math.min(1, oldZoom - delta));
+      if (newZoom === oldZoom) return;
+
+      /* Keep the point under the cursor fixed */
+      const contentX = vp.scrollLeft + e.clientX;
+      const contentY = vp.scrollTop + e.clientY;
+      const ratio = newZoom / oldZoom;
+
+      zoomRef.current = newZoom;
+      setZoom(newZoom);
+
+      vp.scrollLeft = contentX * ratio - e.clientX;
+      vp.scrollTop  = contentY * ratio - e.clientY;
     };
     vp.addEventListener('wheel', onWheel, { passive: false });
     return () => vp.removeEventListener('wheel', onWheel);
@@ -998,8 +1173,11 @@ function App() {
         </div>
       </div>
 
-      {/* Side panel */}
-      <div className={`sidepanel${animPhase ? ' anim-hide' : ''}`} style={{ '--sp-clr': currentColor }}>
+      {/* Side panel / Bottom sheet */}
+      <div ref={sheetRef}
+           className={`sidepanel${animPhase ? ' anim-hide' : ''}${isMobile ? ` sheet-${sheetMode}` : ''}`}
+           style={{ '--sp-clr': currentColor }}>
+        {isMobile && <div className="sheet-handle" />}
         <div className="sp-cluster"><span className="dot" />{breadcrumbFor(currentNode)}</div>
         <div className="sp-title">{currentNode.label}{currentNode.type === 'gate' ? ` · ${currentNode.kind === 'intro' ? 'Intro' : 'Test'}` : ''}</div>
         {currentNode.hours && (
@@ -1042,14 +1220,16 @@ function App() {
           }
           return <button className="sp-cta locked" disabled>{isCurStarGated ? 'Need more experience' : 'Locked'}</button>;
         })()}
-        <div className="sp-foot">
-          <span className="kbd">space</span>
-          <span>to master · drag to pan the map</span>
-        </div>
+        {!isMobile && (
+          <div className="sp-foot">
+            <span className="kbd">space</span>
+            <span>to master · drag to pan the map</span>
+          </div>
+        )}
       </div>
 
       {/* Legend */}
-      <div className={`legend${animPhase ? ' anim-hide' : ''}`}>
+      <div className={`legend${animPhase ? ' anim-hide' : ''}${legendOpen ? ' legend-open' : ''}`}>
         <div className="legend-title">Domains</div>
         {DOMAINS.map(dom => {
           const dp = domainProgress[dom.id];
@@ -1064,27 +1244,14 @@ function App() {
           );
         })}
       </div>
+      {isMobile && (
+        <button className={`legend-toggle${animPhase ? ' anim-hide' : ''}`}
+                onClick={() => setLegendOpen(v => !v)}
+                title="Toggle domains">
+          ◐
+        </button>
+      )}
 
-      {/* Map controls */}
-      <div className={`map-controls${animPhase ? ' anim-hide' : ''}`}>
-        <button className="icon-btn" onClick={() => scrollToNode(GOAL_ID, true)} title="To goal (G)">
-          ↑ To goal
-        </button>
-        <button className="icon-btn" onClick={() => scrollToNode(current, true)} title="To my position (H)">
-          <CompassIcon /> I'm here
-        </button>
-        <button className="icon-btn" onClick={() => scrollToNode(START_ID, true)} title="To start (S)">
-          ↓ To start
-        </button>
-        <div className="zoom-divider" />
-        <button className="icon-btn" onClick={() => setZoom(z => Math.min(1, +(z + 0.1).toFixed(1)))} title="Zoom in" disabled={zoom >= 1}>
-          +
-        </button>
-        <button className="icon-btn zoom-level" disabled>{Math.round(zoom * 100)}%</button>
-        <button className="icon-btn" onClick={() => setZoom(z => Math.max(0.3, +(z - 0.1).toFixed(1)))} title="Zoom out" disabled={zoom <= 0.3}>
-          −
-        </button>
-      </div>
 
       {/* Tweaks */}
       <TweaksPanel title="Tweaks">

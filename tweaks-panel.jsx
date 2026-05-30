@@ -154,6 +154,17 @@ const __TWEAKS_STYLE = `
   .twk-chip>span>i:first-child{box-shadow:none}
   .twk-chip svg{position:absolute;top:6px;left:6px;width:13px;height:13px;
     filter:drop-shadow(0 1px 1px rgba(0,0,0,.3))}
+
+  @media(max-width:767px){
+    .twk-panel{position:fixed!important;inset:0!important;width:100%!important;
+      max-height:100dvh!important;border-radius:0!important;
+      transform:none!important}
+    .twk-hd{cursor:default}
+    .twk-btn{min-height:44px}
+    .twk-toggle{width:40px;height:22px}
+    .twk-toggle i{width:18px;height:18px}
+    .twk-toggle[data-on="1"] i{transform:translateX(18px)}
+  }
 `;
 
 // ── useTweaks ───────────────────────────────────────────────────────────────
@@ -232,6 +243,7 @@ function TweaksPanel({ title = 'Tweaks', children }) {
   };
 
   const onDragStart = (e) => {
+    if (window.innerWidth < 768) return;
     const panel = dragRef.current;
     if (!panel) return;
     const r = panel.getBoundingClientRect();
