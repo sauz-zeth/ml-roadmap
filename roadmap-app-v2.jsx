@@ -145,13 +145,6 @@ const ResetIcon = () => (
   </svg>
 );
 
-const CompassIcon = () => (
-  <svg viewBox="0 0 24 24" fill="none">
-    <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6"/>
-    <path d="M15 9l-2 5-5 2 2-5 5-2z" fill="currentColor" stroke="currentColor" strokeWidth="1" strokeLinejoin="round"/>
-  </svg>
-);
-
 const Star = ({ filled, glow, size = 11 }) => (
   <svg className="star-svg" width={size} height={size} viewBox="0 0 24 24">
     <path d="M12 2.5 L14.6 9 L21.6 9.6 L16.3 14.2 L17.9 21.1 L12 17.4 L6.1 21.1 L7.7 14.2 L2.4 9.6 L9.4 9 Z"
@@ -168,6 +161,11 @@ const StarsRow = ({ difficulty, glow, size = 11 }) => (
       <Star key={i} filled={i <= difficulty} glow={glow && i <= difficulty} size={size} />
     ))}
   </div>
+);
+
+const XPBadge = ({ xp, earned, size = 'sm', opacity }) => (
+  <span className={`xp-badge ${size}${earned ? ' earned' : ''}`}
+    style={opacity != null ? { opacity } : undefined}>+{xp} XP</span>
 );
 
 /* ──────────────────────────────────────────────────────────────────────── */
@@ -409,6 +407,7 @@ function QuizOverlay({ questions, passThreshold, accentColor, onPass, onClose })
             onClickRight={handleMatchRight} />
         )}
         <div className="quiz-nav">
+          <button className="quiz-skip" onClick={onPass}>Skip Test</button>
           <button className={'quiz-next' + (canAdvance ? '' : ' disabled')}
             disabled={!canAdvance}
             onClick={handleNext}
@@ -492,7 +491,7 @@ function NodeView({ node, isDone, isCur, isUnlk, isAvail, isStarLocked, onClick,
   // Closer locked nodes hint at the next step; far ones fade into the background.
   if (!isUnlk && !isStarLocked) {
     const d = distance ?? 99;
-    const alpha = Math.max(0.035, 0.55 / (d + 0.6));
+    const alpha = Math.max(0.15, 0.7 / (d + 0.5));
     style['--c'] = hexA(node.color, alpha);
   }
 
@@ -504,6 +503,8 @@ function NodeView({ node, isDone, isCur, isUnlk, isAvail, isStarLocked, onClick,
           {isDone ? <CheckIcon size={14} color="#07210e" /> : (!isUnlk ? <LockIcon size={11} /> : null)}
         </div>
         {showLabels && <div className="node-label">{node.label}</div>}
+        {node.difficulty && <XPBadge xp={node.difficulty} earned={isDone} size="xs"
+          opacity={!isUnlk ? Math.max(0.15, 0.8 / ((distance ?? 99) + 0.5)) : undefined} />}
       </div>
     );
   }
@@ -515,7 +516,7 @@ function NodeView({ node, isDone, isCur, isUnlk, isAvail, isStarLocked, onClick,
     : (node.kind === 'intro' ? 'Intro' : 'Test');
 
   const isTestGate = node.type === 'gate' && node.kind === 'test';
-  const starSize = node.tier === 'domain' ? 13 : 10;
+  const xpOpacity = !isUnlk ? Math.max(0.15, 0.8 / ((distance ?? 99) + 0.5)) : undefined;
 
   return (
     <div className={cls} style={style} onClick={onClick}
@@ -525,11 +526,11 @@ function NodeView({ node, isDone, isCur, isUnlk, isAvail, isStarLocked, onClick,
         {subText && <div className="gate-sub">{subText}</div>}
       </div>
       {isTestGate && !isStarLocked && (
-        <StarsRow difficulty={node.difficulty} glow={isDone} size={starSize} />
+        <XPBadge xp={node.difficulty} earned={isDone} size={node.tier === 'domain' ? 'md' : 'sm'} opacity={xpOpacity} />
       )}
       {isTestGate && isStarLocked && (
         <div className="star-gate-badge">
-          ★ Need {node.starThreshold}
+          {node.starThreshold.toLocaleString()} XP
         </div>
       )}
     </div>
@@ -557,14 +558,25 @@ function App() {
   const [quizOpen,  setQuizOpen]  = useState(false);
   const [animPhase, setAnimPhase] = useState(null);
   const [animLevel, setAnimLevel] = useState(-1);
-  const [zoom, setZoom] = useState(() => window.innerWidth < 768 ? 0.45 : 1);
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 768);
-  const [sheetMode, setSheetMode] = useState('peek'); // 'collapsed' | 'peek' | 'expanded'
+  const [sheetMode, setSheetMode] = useState('peek');
   const [legendOpen, setLegendOpen] = useState(false);
-  const zoomRef = useRef(zoom);
+  /* Camera state — refs for direct DOM manipulation (no React re-render per frame) */
+  const camRef = useRef({
+    zoom: window.innerWidth < 768 ? 0.45 : 1,
+    panX: 0, panY: 0,
+  });
   const sheetRef = useRef(null);
+  const mapRef = useRef(null);
 
-  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
+  const applyTransform = useCallback(() => {
+    const el = mapRef.current;
+    if (!el) return;
+    const { zoom, panX, panY } = camRef.current;
+    el.style.transform = `translate(${panX}px, ${panY}px) scale(${zoom})`;
+  }, []);
+
+  const getZoom = () => camRef.current.zoom;
 
   useEffect(() => {
     const mql = window.matchMedia('(max-width: 767px)');
@@ -584,7 +596,7 @@ function App() {
     const u = new Set([START_ID]);
     for (const id of completed) {
       u.add(id);
-      for (const nb of ADJ[id] || []) u.add(nb);
+      for (const nb of ADJ_UP[id] || []) u.add(nb);
     }
     return u;
   }, [completed]);
@@ -617,8 +629,9 @@ function App() {
       if (n.tier !== 'domain' || n.kind !== 'test') continue;
       if (completed.has(n.id)) continue;
       if (n.starThreshold > earnedStars) {
-        if (!best || n.starThreshold < best.threshold) {
-          best = { label: n.label, threshold: n.starThreshold, need: n.starThreshold - earnedStars };
+        const need = n.starThreshold - earnedStars;
+        if (!best || need < best.need) {
+          best = { label: n.label, threshold: n.starThreshold, need };
         }
       }
     }
@@ -683,28 +696,38 @@ function App() {
     setVictory(false);
   }, []);
 
-  /* Auto-scroll viewport to a node */
+  /* Pan camera to center a node */
   const scrollToNode = useCallback((nodeId, smooth = true) => {
     const vp = viewportRef.current;
     if (!vp) return;
     const node = NODE_BY_ID[nodeId];
     if (!node) return;
-    const z = zoom;
-    /* The .map div has margin:0 auto and transform-origin:top center.
-       With scale(z), the visual center of the canvas stays at the layout center.
-       Node visual position = layoutCenterX + (node.x - CANVAS_W/2) * z */
-    const mapEl = vp.querySelector('.map');
-    const layoutLeft = mapEl ? mapEl.offsetLeft : (vp.scrollWidth - LAYOUT.CANVAS_W) / 2;
-    const visualX = layoutLeft + LAYOUT.CANVAS_W / 2 + (node.x - LAYOUT.CANVAS_W / 2) * z;
-    const visualY = node.y * z;
-    /* On mobile, shift center upward so the node sits above the bottom sheet */
-    const sheetOffset = isMobile ? vp.clientHeight * 0.2 : 0;
-    vp.scrollTo({
-      left: Math.max(0, Math.min(visualX - vp.clientWidth / 2, vp.scrollWidth  - vp.clientWidth)),
-      top:  Math.max(0, Math.min(visualY - vp.clientHeight / 2 + sheetOffset, vp.scrollHeight - vp.clientHeight)),
-      behavior: smooth ? 'smooth' : 'auto',
-    });
-  }, [zoom, isMobile]);
+    const cam = camRef.current;
+    const z = cam.zoom;
+    /* On mobile, shift center up so node sits above bottom sheet */
+    const offsetY = isMobile ? vp.clientHeight * 0.15 : 0;
+    const targetX = vp.clientWidth / 2 - node.x * z;
+    const targetY = vp.clientHeight / 2 - node.y * z - offsetY;
+
+    if (!smooth) {
+      cam.panX = targetX; cam.panY = targetY;
+      applyTransform();
+      return;
+    }
+    /* Smooth animated pan */
+    const fromX = cam.panX, fromY = cam.panY;
+    const dur = 400;
+    const t0 = performance.now();
+    const animate = (now) => {
+      const p = Math.min(1, (now - t0) / dur);
+      const ease = 1 - (1 - p) * (1 - p); // ease-out quad
+      cam.panX = fromX + (targetX - fromX) * ease;
+      cam.panY = fromY + (targetY - fromY) * ease;
+      applyTransform();
+      if (p < 1) requestAnimationFrame(animate);
+    };
+    requestAnimationFrame(animate);
+  }, [isMobile, applyTransform]);
 
   useLayoutEffect(() => {
     if (initialScrolled.current) return;
@@ -761,226 +784,258 @@ function App() {
     return () => document.body.classList.remove('anim-active');
   }, [animPhase]);
 
-  /* Build animation — single continuous scroll, levels revealed as camera passes */
+  /* Build animation — camera pans through levels */
   const animFrameRef = useRef(null);
   useEffect(() => {
     if (animPhase !== 'building') return;
     const vp = viewportRef.current;
     if (!vp) return;
-
-    // Scroll targets: center viewport on each level's Y (account for zoom)
-    const z = zoom;
+    const cam = camRef.current;
+    const z = cam.zoom;
     const halfH = vp.clientHeight / 2;
-    const maxScroll = vp.scrollHeight - vp.clientHeight;
-    const targets = ANIM_LEVELS.map(l => Math.max(0, Math.min(maxScroll, l.y * z - halfH)));
+    const centerX = vp.clientWidth / 2;
 
-    const startScroll = targets[0];
-    const endScroll = targets[targets.length - 1];
-    const totalDist = Math.abs(endScroll - startScroll);
-    const SPEED = 0.45; // px per ms — constant
+    // Target panY for each level: center level on screen
+    const targets = ANIM_LEVELS.map(l => halfH - l.y * z);
+    const startPanY = targets[0];
+    const endPanY = targets[targets.length - 1];
+    const totalDist = Math.abs(endPanY - startPanY);
+    const SPEED = 0.45;
     const totalDuration = totalDist / SPEED;
-    const INITIAL_DELAY = 500; // ms before scrolling starts
+    const INITIAL_DELAY = 500;
 
-    // Jump to bottom (first level) immediately
-    vp.scrollTop = startScroll;
+    cam.panX = centerX - (LAYOUT.CANVAS_W / 2) * z;
+    cam.panY = startPanY;
+    applyTransform();
     setAnimLevel(0);
 
-    let t0 = null;
-    let lastLevel = 0;
-
+    let t0 = null, lastLevel = 0;
     const step = (now) => {
       if (!t0) t0 = now;
       const elapsed = now - t0;
+      if (elapsed < INITIAL_DELAY) { animFrameRef.current = requestAnimationFrame(step); return; }
+      const p = Math.min(1, (elapsed - INITIAL_DELAY) / totalDuration);
+      cam.panY = startPanY + (endPanY - startPanY) * p;
+      applyTransform();
 
-      if (elapsed < INITIAL_DELAY) {
-        animFrameRef.current = requestAnimationFrame(step);
-        return;
-      }
-
-      const scrollElapsed = elapsed - INITIAL_DELAY;
-      const p = Math.min(1, scrollElapsed / totalDuration);
-
-      // Linear interpolation
-      const scrollY = startScroll + (endScroll - startScroll) * p;
-      vp.scrollTop = scrollY;
-
-      // Reveal levels whose target scroll position we've passed
       for (let i = lastLevel + 1; i < targets.length; i++) {
-        const levelTarget = targets[i];
-        // Check if camera has reached close enough to this level
-        const reached = startScroll < endScroll
-          ? scrollY >= levelTarget - halfH * 0.3
-          : scrollY <= levelTarget + halfH * 0.3;
-        if (reached) {
-          lastLevel = i;
-          setAnimLevel(i);
-        } else {
-          break;
-        }
+        const reached = startPanY > endPanY
+          ? cam.panY <= targets[i] + halfH * 0.3
+          : cam.panY >= targets[i] - halfH * 0.3;
+        if (reached) { lastLevel = i; setAnimLevel(i); } else break;
       }
-
       if (p < 1) {
         animFrameRef.current = requestAnimationFrame(step);
       } else {
-        // All done — reveal any remaining levels, then glide back to start
         setAnimLevel(ANIM_LEVELS.length - 1);
         setTimeout(() => {
           setAnimPhase('done');
-          const startNode = NODE_BY_ID[START_ID];
-          if (vp && startNode) {
-            const targetY = Math.max(0, Math.min(startNode.y * z - halfH, maxScroll));
-            const fromY = vp.scrollTop;
-            const dist = Math.abs(targetY - fromY);
-            const dur = Math.max(1500, Math.min(2000, dist / 0.35));
-            const st0 = performance.now();
-            const glide = (now) => {
-              const gp = Math.min(1, (now - st0) / dur);
-              // ease-out quad for gentle deceleration at the end
-              const eased = 1 - (1 - gp) * (1 - gp);
-              vp.scrollTop = fromY + (targetY - fromY) * eased;
-              if (gp < 1) {
-                requestAnimationFrame(glide);
-              } else {
-                setTimeout(() => setAnimPhase(null), 300);
-              }
-            };
-            requestAnimationFrame(glide);
-          } else {
-            scrollToNode(START_ID, true);
-            setTimeout(() => setAnimPhase(null), 800);
-          }
+          scrollToNode(START_ID, true);
+          setTimeout(() => setAnimPhase(null), 1500);
         }, 600);
       }
     };
-
     animFrameRef.current = requestAnimationFrame(step);
     return () => { if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current); };
-  }, [animPhase, scrollToNode, zoom]);
+  }, [animPhase, scrollToNode, applyTransform]);
 
-  /* Mouse drag panning */
+  /* ── All camera gestures: drag, wheel-zoom, touch-pan, pinch-zoom ── */
   useEffect(() => {
     const vp = viewportRef.current;
     if (!vp) return;
-    let dragging = false; let sx = 0; let sy = 0; let sl = 0; let st = 0;
-    const onDown = (e) => {
-      if (e.target.closest('.node') || e.target.closest('.glass') ||
-          e.target.closest('.sidepanel') || e.target.closest('.legend') ||
-          e.target.closest('.map-controls') || e.target.closest('.twk-panel')) return;
-      dragging = true; sx = e.clientX; sy = e.clientY; sl = vp.scrollLeft; st = vp.scrollTop;
+    const cam = camRef.current;
+    const apply = applyTransform;
+    const isUI = (el) => el.closest('.node') || el.closest('.glass') ||
+      el.closest('.sidepanel') || el.closest('.legend') ||
+      el.closest('.twk-panel') || el.closest('.sheet-handle');
+
+    /* — Inertia engine (pan + zoom) — */
+    let inertiaId = 0;
+    let vx = 0, vy = 0; // pan velocity px/frame
+    let vz = 0; // zoom velocity (multiplier delta per frame)
+    let anchorX = 0, anchorY = 0; // zoom anchor point (screen coords)
+    const PAN_FRICTION = 0.92;
+    const ZOOM_FRICTION = 0.85;
+    const MIN_V = 0.5;
+    const MIN_VZ = 0.0001;
+    const coast = () => {
+      vx *= PAN_FRICTION; vy *= PAN_FRICTION;
+      vz *= ZOOM_FRICTION;
+      const panAlive = Math.abs(vx) > MIN_V || Math.abs(vy) > MIN_V;
+      const zoomAlive = Math.abs(vz) > MIN_VZ;
+      if (!panAlive && !zoomAlive) { inertiaId = 0; return; }
+      if (panAlive) { cam.panX += vx; cam.panY += vy; }
+      if (zoomAlive) {
+        const oldZ = cam.zoom;
+        const newZ = Math.max(0.15, Math.min(3, oldZ + vz));
+        if (newZ !== oldZ) {
+          cam.panX = anchorX - (anchorX - cam.panX) * (newZ / oldZ);
+          cam.panY = anchorY - (anchorY - cam.panY) * (newZ / oldZ);
+          cam.zoom = newZ;
+        } else { vz = 0; }
+      }
+      apply();
+      inertiaId = requestAnimationFrame(coast);
+    };
+    const stopInertia = () => { if (inertiaId) { cancelAnimationFrame(inertiaId); inertiaId = 0; } vx = vy = vz = 0; };
+    const startInertia = () => {
+      stopInertia();
+      // restore velocities that were just zeroed — caller sets them after this
+    };
+    const launchInertia = () => {
+      if (inertiaId) cancelAnimationFrame(inertiaId);
+      if (Math.abs(vx) > MIN_V || Math.abs(vy) > MIN_V || Math.abs(vz) > MIN_VZ)
+        inertiaId = requestAnimationFrame(coast);
+    };
+
+    /* — Mouse drag — */
+    let drag = false, mx = 0, my = 0, lastMx = 0, lastMy = 0, lastMoveT = 0;
+    const onMouseDown = (e) => {
+      if (isUI(e.target)) return;
+      stopInertia();
+      drag = true; mx = e.clientX; my = e.clientY;
+      lastMx = mx; lastMy = my; lastMoveT = Date.now();
       vp.style.cursor = 'grabbing';
     };
-    const onMove = (e) => {
-      if (!dragging) return;
-      vp.scrollLeft = sl - (e.clientX - sx);
-      vp.scrollTop  = st - (e.clientY - sy);
+    const onMouseMove = (e) => {
+      if (!drag) return;
+      cam.panX += e.clientX - mx; cam.panY += e.clientY - my;
+      const now = Date.now();
+      const dt = now - lastMoveT || 16;
+      vx = (e.clientX - lastMx) * (16 / dt);
+      vy = (e.clientY - lastMy) * (16 / dt);
+      lastMx = e.clientX; lastMy = e.clientY; lastMoveT = now;
+      mx = e.clientX; my = e.clientY;
+      apply();
     };
-    const onUp = () => { dragging = false; vp.style.cursor = ''; };
-    vp.addEventListener('mousedown', onDown);
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-    return () => {
-      vp.removeEventListener('mousedown', onDown);
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
+    const onMouseUp = () => {
+      if (!drag) return;
+      drag = false; vp.style.cursor = '';
+      if (Date.now() - lastMoveT > 60) { vx = 0; vy = 0; }
+      vz = 0;
+      launchInertia();
     };
-  }, []);
 
-  /* Touch drag panning */
-  useEffect(() => {
-    const vp = viewportRef.current;
-    if (!vp) return;
-    let dragging = false; let sx = 0; let sy = 0; let sl = 0; let st = 0;
-    const skip = (el) => el.closest('.node') || el.closest('.glass') ||
-      el.closest('.sidepanel') || el.closest('.legend') ||
-      el.closest('.map-controls') || el.closest('.twk-panel') || el.closest('.sheet-handle');
-    const onStart = (e) => {
-      if (e.touches.length !== 1) return;
-      const t = e.touches[0];
-      if (skip(t.target)) return;
-      dragging = true;
-      sx = t.clientX; sy = t.clientY; sl = vp.scrollLeft; st = vp.scrollTop;
-    };
-    const onMove = (e) => {
-      if (!dragging || e.touches.length !== 1) { dragging = false; return; }
+    /* — Wheel: trackpad 2-finger scroll → pan, pinch (ctrl+wheel) → zoom — */
+    let wheelActive = false, wheelTimer = 0;
+    const onWheel = (e) => {
       e.preventDefault();
-      const t = e.touches[0];
-      vp.scrollLeft = sl - (t.clientX - sx);
-      vp.scrollTop  = st - (t.clientY - sy);
+      // Don't stop inertia — just override cam directly, coast picks up seamlessly
+      if (inertiaId) { cancelAnimationFrame(inertiaId); inertiaId = 0; }
+      wheelActive = true;
+      if (e.ctrlKey || e.metaKey) {
+        const oldZ = cam.zoom;
+        const newZ = Math.max(0.15, Math.min(3, oldZ * (1 - e.deltaY * 0.005)));
+        if (newZ === oldZ) return;
+        cam.panX = e.clientX - (e.clientX - cam.panX) * (newZ / oldZ);
+        cam.panY = e.clientY - (e.clientY - cam.panY) * (newZ / oldZ);
+        cam.zoom = newZ;
+        vz = newZ - oldZ;
+        anchorX = e.clientX; anchorY = e.clientY;
+        vx = 0; vy = 0;
+      } else {
+        cam.panX -= e.deltaX;
+        cam.panY -= e.deltaY;
+        vx = -e.deltaX * 0.5;
+        vy = -e.deltaY * 0.5;
+        vz = 0;
+      }
+      apply();
+      clearTimeout(wheelTimer);
+      wheelTimer = setTimeout(() => { wheelActive = false; launchInertia(); }, 30);
     };
-    const onEnd = () => { dragging = false; };
-    vp.addEventListener('touchstart', onStart, { passive: true });
-    vp.addEventListener('touchmove', onMove, { passive: false });
-    vp.addEventListener('touchend', onEnd);
-    return () => {
-      vp.removeEventListener('touchstart', onStart);
-      vp.removeEventListener('touchmove', onMove);
-      vp.removeEventListener('touchend', onEnd);
-    };
-  }, []);
 
-  /* Pinch-to-zoom (anchored to pinch midpoint) */
-  useEffect(() => {
-    const vp = viewportRef.current;
-    if (!vp) return;
-    let pinching = false;
-    let startDist = 0;
-    let startZoom = 1;
-    let startScrollX = 0, startScrollY = 0;
-    let anchorX = 0, anchorY = 0; // pinch midpoint in document coords
+    /* — Touch pan (1 finger) — */
+    let touchDrag = false, tx = 0, ty = 0, lastTx = 0, lastTy = 0, lastTouchT = 0;
+    /* — Pinch zoom (2 fingers) — */
+    let pinching = false, startDist = 0, startZoom = 1, startPanX = 0, startPanY = 0;
+    let startMidX = 0, startMidY = 0;
+    let lastPinchZ = 0, lastPinchT = 0, pinchMidX = 0, pinchMidY = 0;
 
-    const getDist = (ts) => {
-      const dx = ts[0].clientX - ts[1].clientX;
-      const dy = ts[0].clientY - ts[1].clientY;
-      return Math.sqrt(dx * dx + dy * dy);
-    };
-    const getMid = (ts) => ({
-      x: (ts[0].clientX + ts[1].clientX) / 2,
-      y: (ts[0].clientY + ts[1].clientY) / 2,
-    });
+    const getDist = (ts) => Math.hypot(ts[0].clientX - ts[1].clientX, ts[0].clientY - ts[1].clientY);
 
-    const onStart = (e) => {
+    const onTouchStart = (e) => {
+      stopInertia();
       if (e.touches.length === 2) {
-        pinching = true;
+        touchDrag = false; pinching = true;
         startDist = getDist(e.touches);
-        startZoom = zoomRef.current;
-        startScrollX = vp.scrollLeft;
-        startScrollY = vp.scrollTop;
-        const mid = getMid(e.touches);
-        // Pinch midpoint in content coordinates
-        anchorX = startScrollX + mid.x;
-        anchorY = startScrollY + mid.y;
+        startZoom = cam.zoom; startPanX = cam.panX; startPanY = cam.panY;
+        startMidX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        startMidY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        lastPinchZ = cam.zoom; lastPinchT = Date.now();
+        pinchMidX = startMidX; pinchMidY = startMidY;
+      } else if (e.touches.length === 1 && !pinching) {
+        const t = e.touches[0];
+        if (isUI(t.target)) return;
+        touchDrag = true; tx = t.clientX; ty = t.clientY;
+        lastTx = tx; lastTy = ty; lastTouchT = Date.now();
       }
     };
-    const onMove = (e) => {
-      if (!pinching || e.touches.length !== 2) return;
-      e.preventDefault();
-      const dist = getDist(e.touches);
-      const ratio = dist / startDist;
-      const newZoom = Math.max(0.2, Math.min(1, startZoom * ratio));
-
-      // Apply zoom
-      zoomRef.current = newZoom;
-      setZoom(newZoom);
-
-      // Adjust scroll so the anchor point stays under the pinch midpoint
-      const zoomChange = newZoom / startZoom;
-      const mid = getMid(e.touches);
-      vp.scrollLeft = anchorX * zoomChange - mid.x;
-      vp.scrollTop  = anchorY * zoomChange - mid.y;
+    const onTouchMove = (e) => {
+      if (pinching && e.touches.length === 2) {
+        e.preventDefault();
+        const dist = getDist(e.touches);
+        const newZ = Math.max(0.15, Math.min(3, startZoom * (dist / startDist)));
+        const midX = (e.touches[0].clientX + e.touches[1].clientX) / 2;
+        const midY = (e.touches[0].clientY + e.touches[1].clientY) / 2;
+        cam.zoom = newZ;
+        cam.panX = midX - (startMidX - startPanX) * (newZ / startZoom) + (midX - startMidX);
+        cam.panY = midY - (startMidY - startPanY) * (newZ / startZoom) + (midY - startMidY);
+        // Track zoom velocity
+        const now = Date.now();
+        const dt = now - lastPinchT || 16;
+        vz = (newZ - lastPinchZ) * (16 / dt);
+        lastPinchZ = newZ; lastPinchT = now;
+        pinchMidX = midX; pinchMidY = midY;
+        apply();
+      } else if (touchDrag && e.touches.length === 1) {
+        e.preventDefault();
+        const t = e.touches[0];
+        cam.panX += t.clientX - tx; cam.panY += t.clientY - ty;
+        const now = Date.now();
+        const dt = now - lastTouchT || 16;
+        vx = (t.clientX - lastTx) * (16 / dt);
+        vy = (t.clientY - lastTy) * (16 / dt);
+        lastTx = t.clientX; lastTy = t.clientY; lastTouchT = now;
+        tx = t.clientX; ty = t.clientY;
+        apply();
+      }
     };
-    const onEnd = (e) => {
-      if (e.touches.length < 2) pinching = false;
+    const onTouchEnd = (e) => {
+      if (e.touches.length < 2 && pinching) {
+        pinching = false;
+        // Launch zoom inertia from pinch
+        anchorX = pinchMidX; anchorY = pinchMidY;
+        if (Date.now() - lastPinchT > 60) vz = 0;
+        vx = 0; vy = 0;
+        launchInertia();
+      }
+      if (e.touches.length === 0 && touchDrag) {
+        touchDrag = false;
+        if (Date.now() - lastTouchT > 60) { vx = 0; vy = 0; }
+        vz = 0;
+        launchInertia();
+      }
     };
 
-    vp.addEventListener('touchstart', onStart, { passive: true });
-    vp.addEventListener('touchmove', onMove, { passive: false });
-    vp.addEventListener('touchend', onEnd);
+    vp.addEventListener('mousedown', onMouseDown);
+    window.addEventListener('mousemove', onMouseMove);
+    window.addEventListener('mouseup', onMouseUp);
+    vp.addEventListener('wheel', onWheel, { passive: false });
+    vp.addEventListener('touchstart', onTouchStart, { passive: true });
+    vp.addEventListener('touchmove', onTouchMove, { passive: false });
+    vp.addEventListener('touchend', onTouchEnd);
     return () => {
-      vp.removeEventListener('touchstart', onStart);
-      vp.removeEventListener('touchmove', onMove);
-      vp.removeEventListener('touchend', onEnd);
+      stopInertia();
+      vp.removeEventListener('mousedown', onMouseDown);
+      window.removeEventListener('mousemove', onMouseMove);
+      window.removeEventListener('mouseup', onMouseUp);
+      vp.removeEventListener('wheel', onWheel);
+      vp.removeEventListener('touchstart', onTouchStart);
+      vp.removeEventListener('touchmove', onTouchMove);
+      vp.removeEventListener('touchend', onTouchEnd);
     };
-  }, []);
+  }, [applyTransform]);
 
   /* Bottom sheet drag */
   useEffect(() => {
@@ -1025,36 +1080,6 @@ function App() {
     };
   }, [isMobile]);
 
-  /* Wheel / trackpad-pinch zoom (anchored to cursor) */
-  useEffect(() => {
-    const vp = viewportRef.current;
-    if (!vp) return;
-    const onWheel = (e) => {
-      /* Trackpad pinch sends wheel with ctrlKey; regular scroll is vertical navigation.
-         Accept both: ctrlKey (pinch) uses deltaY, plain wheel uses deltaY with smaller factor. */
-      const isPinch = e.ctrlKey || e.metaKey;
-      const delta = isPinch ? e.deltaY * 0.005 : e.deltaY * 0.001;
-      e.preventDefault();
-
-      const oldZoom = zoomRef.current;
-      const newZoom = Math.max(0.2, Math.min(1, oldZoom - delta));
-      if (newZoom === oldZoom) return;
-
-      /* Keep the point under the cursor fixed */
-      const contentX = vp.scrollLeft + e.clientX;
-      const contentY = vp.scrollTop + e.clientY;
-      const ratio = newZoom / oldZoom;
-
-      zoomRef.current = newZoom;
-      setZoom(newZoom);
-
-      vp.scrollLeft = contentX * ratio - e.clientX;
-      vp.scrollTop  = contentY * ratio - e.clientY;
-    };
-    vp.addEventListener('wheel', onWheel, { passive: false });
-    return () => vp.removeEventListener('wheel', onWheel);
-  }, []);
-
   const progress = completed.size;
   const total = NODES.length;
   const pct = (progress / total) * 100;
@@ -1074,7 +1099,7 @@ function App() {
     <React.Fragment>
       {/* Scrollable map */}
       <div className="viewport" ref={viewportRef}>
-        <div className="map" style={zoom < 1 ? { width: LAYOUT.CANVAS_W, height: LAYOUT.CANVAS_H, transform: `scale(${zoom})`, transformOrigin: 'top center', marginBottom: (zoom - 1) * LAYOUT.CANVAS_H } : { width: LAYOUT.CANVAS_W, height: LAYOUT.CANVAS_H }}>
+        <div className="map" ref={mapRef} style={{ width: LAYOUT.CANVAS_W, height: LAYOUT.CANVAS_H, transformOrigin: '0 0' }}>
 
           {/* Edges */}
           <svg
@@ -1152,24 +1177,18 @@ function App() {
       </div>
 
       {/* Top bar */}
-      <div className={`topbar${animPhase ? ' anim-hide' : ''}`}>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'stretch', pointerEvents: 'auto' }}>
-          <div className="progress-card exp glass">
-            <div className="progress-meta">
-              <div className="progress-label">Experience</div>
-              <div className="progress-count">
-                {earnedStars}<span> ★ / {maxStars}</span>
-              </div>
-              {nextThreshold && (
-                <div className="exp-next">Next: <b>{nextThreshold.label}</b> in <b>{nextThreshold.need}★</b></div>
-              )}
-            </div>
-            <div className="progress-bar">
-              <div className="progress-fill" style={{ width: `${(earnedStars / maxStars) * 100}%` }} />
-            </div>
+      <div className={`topbar progress-card exp glass${animPhase ? ' anim-hide' : ''}`}>
+        <div className="progress-meta">
+          <div className="progress-label">Experience</div>
+          <div className="progress-count">
+            {earnedStars.toLocaleString()}<span> XP / {maxStars.toLocaleString()}</span>
           </div>
-          <div className="topbar-actions">
-          </div>
+          {nextThreshold && (
+            <div className="exp-next">Next: <b>{nextThreshold.label}</b> in <b>{nextThreshold.need.toLocaleString()} XP</b></div>
+          )}
+        </div>
+        <div className="progress-bar">
+          <div className="progress-fill" style={{ width: `${(earnedStars / maxStars) * 100}%` }} />
         </div>
       </div>
 
@@ -1192,15 +1211,15 @@ function App() {
             Free {currentNode.label} courses & guides
           </button>
         )}
-        {currentNode.type === 'gate' && currentNode.kind === 'test' && (
+        {currentNode.difficulty && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
             <div style={{ fontSize: 10.5, letterSpacing: '0.14em', color: 'var(--text-faint)', textTransform: 'uppercase', fontWeight: 600 }}>Reward</div>
-            <StarsRow difficulty={currentNode.difficulty} glow={isCurDone} size={12} />
+            <XPBadge xp={currentNode.difficulty} earned={isCurDone} size="md" />
           </div>
         )}
         {isCurStarGated && (
           <div style={{ marginBottom: 14, padding: '10px 12px', borderRadius: 12, background: 'rgba(255, 214, 10, 0.06)', border: '1px solid rgba(255, 214, 10, 0.3)', fontSize: 12, color: '#FFD60A', lineHeight: 1.45 }}>
-            <b style={{fontWeight: 700}}>★ Locked by experience.</b> You have <b>{earnedStars}</b>, need <b>{currentNode.starThreshold}</b> stars. Master more sub-tests in this domain to unlock.
+            <b style={{fontWeight: 700}}>Locked.</b> You have <b>{earnedStars.toLocaleString()} XP</b>, need <b>{currentNode.starThreshold.toLocaleString()} XP</b> to unlock.
           </div>
         )}
         {(() => {
@@ -1211,10 +1230,10 @@ function App() {
           }
           if (canCompleteCur) {
             if (hasQuiz) {
-              return <button className="sp-cta" onClick={() => setQuizOpen(true)}>Take Test{currentNode.difficulty ? ` (+${currentNode.difficulty}★)` : ''}</button>;
+              return <button className="sp-cta" onClick={() => setQuizOpen(true)}>Take Test{currentNode.difficulty ? ` (+${currentNode.difficulty} XP)` : ''}</button>;
             }
             if (isTest) {
-              return <button className="sp-cta" onClick={handleComplete}>Take Test{currentNode.difficulty ? ` (+${currentNode.difficulty}★)` : ''}</button>;
+              return <button className="sp-cta" onClick={handleComplete}>Take Test{currentNode.difficulty ? ` (+${currentNode.difficulty} XP)` : ''}</button>;
             }
             return <button className="sp-cta" onClick={handleComplete}>Mark as Mastered</button>;
           }
@@ -1244,13 +1263,6 @@ function App() {
           );
         })}
       </div>
-      {isMobile && (
-        <button className={`legend-toggle${animPhase ? ' anim-hide' : ''}`}
-                onClick={() => setLegendOpen(v => !v)}
-                title="Toggle domains">
-          ◐
-        </button>
-      )}
 
 
       {/* Tweaks */}

@@ -57,25 +57,11 @@
   /* ───────── Scrollable map viewport ───────── */
   .viewport {
     position: fixed; inset: 0;
-    overflow-y: auto;
-    overflow-x: auto;
+    overflow: hidden;
     z-index: 1;
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255,255,255,0.12) transparent;
   }
-  .viewport::-webkit-scrollbar { width: 10px; height: 10px; }
-  .viewport::-webkit-scrollbar-track { background: transparent; }
-  .viewport::-webkit-scrollbar-thumb {
-    background: rgba(255,255,255,0.12);
-    border-radius: 99px;
-    border: 2px solid transparent;
-    background-clip: content-box;
-  }
-  .viewport::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); background-clip: content-box; border: 2px solid transparent; }
 
   .map {
-    width: 1600px;
-    height: 4250px;
     position: relative;
     margin: 0 auto;
     background-image:
@@ -264,7 +250,23 @@
   .stars-row.large { gap: 3px; height: 14px; }
   .star-svg { display: block; }
 
-  /* ─── Star-gate badge ("Need X ★") on locked domain tests ─── */
+  /* ─── XP badge ─── */
+  .xp-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 6px;
+    background: rgba(255, 214, 10, 0.1);
+    color: #FFD60A;
+    font-weight: 700;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+  }
+  .xp-badge.xs { font-size: 8px; margin-top: 4px; padding: 1px 5px; border-radius: 4px; }
+  .xp-badge.sm { font-size: 9.5px; margin-top: 5px; }
+  .xp-badge.md { font-size: 12px; padding: 3px 9px; }
+  .xp-badge.earned { background: rgba(48, 209, 88, 0.12); color: #30D158; }
+
+  /* ─── Star-gate badge (XP required on locked domain tests) ─── */
   .star-gate-badge {
     margin-top: 5px;
     display: inline-flex;
@@ -358,17 +360,17 @@
   }
 
   /* ─── Locked ─── */
-  .node.locked { --c: rgba(255,255,255,0.13); }
+  .node.locked { --c: rgba(255,255,255,0.25); }
   .node.locked .shape {
-    background: rgba(255,255,255,0.018);
+    background: rgba(255,255,255,0.03);
     box-shadow:
-      inset 0 1px 0 rgba(255,255,255,0.03),
+      inset 0 1px 0 rgba(255,255,255,0.04),
       0 2px 6px rgba(0,0,0,0.45);
   }
   .node.locked .gate-title,
-  .node.locked .gate-sub { color: var(--text-dim); }
-  .node.locked .node-label { color: var(--text-dim); }
-  .node.locked .lock-icon { opacity: 0.6; }
+  .node.locked .gate-sub { color: rgba(255,255,255,0.4); }
+  .node.locked .node-label { color: rgba(255,255,255,0.4); }
+  .node.locked .lock-icon { opacity: 0.5; }
 
   /* ─── Topbar: Experience card (gold) ─── */
   .progress-card.exp {
@@ -383,15 +385,14 @@
     color: var(--text-faint);
     margin-top: 4px;
     letter-spacing: 0.04em;
+    white-space: nowrap;
   }
   .exp-next b { color: #FFD60A; font-weight: 600; }
 
   /* ─── Top bar ─── */
   .topbar {
-    position: fixed; top: 18px; left: 20px; right: 20px;
-    z-index: 60; pointer-events: none;
-    display: flex; align-items: center; justify-content: flex-end;
-    gap: 10px;
+    position: fixed; top: 18px; right: 20px;
+    z-index: 60;
   }
   .glass {
     background: rgba(20, 22, 28, 0.55);
@@ -424,6 +425,8 @@
   .progress-card {
     padding: 11px 18px 12px;
     display: flex; align-items: center; gap: 16px;
+    width: 332px;
+    box-sizing: border-box;
   }
   .progress-meta {
     display: flex; flex-direction: column; gap: 2px; min-width: 0;
@@ -450,7 +453,6 @@
     transition: width 0.7s cubic-bezier(.4,1.4,.5,1);
     box-shadow: 0 0 10px var(--completed-glow);
   }
-  .topbar-actions { display: flex; gap: 8px; pointer-events: auto; }
   .icon-btn {
     appearance: none; border: 1px solid var(--border);
     background: rgba(20, 22, 28, 0.55);
@@ -639,32 +641,7 @@
   }
   .legend-row.done .legend-swatch { background: var(--completed); box-shadow: 0 0 10px var(--completed-glow); }
 
-  /* ───────── Map controls (bottom-right) ───────── */
-  .map-controls {
-    position: fixed; right: 22px; bottom: 22px;
-    z-index: 50;
-    display: flex; flex-direction: column; gap: 6px;
-    padding: 6px;
-    background: rgba(18, 20, 26, 0.6);
-    backdrop-filter: blur(24px) saturate(160%);
-    -webkit-backdrop-filter: blur(24px) saturate(160%);
-    border: 1px solid var(--border);
-    border-radius: 14px;
-  }
-  .map-controls .icon-btn {
-    padding: 9px 10px;
-    text-transform: none;
-    letter-spacing: 0;
-    font-size: 11px;
-    background: transparent;
-    border: 1px solid transparent;
-    border-radius: 9px;
-    justify-content: center;
-  }
-  .map-controls .icon-btn:hover { background: rgba(255,255,255,0.06); border-color: var(--border); }
-  .map-controls .icon-btn:disabled { opacity: 0.35; pointer-events: none; }
-  .map-controls .zoom-level { font-variant-numeric: tabular-nums; font-size: 10px; color: var(--text-faint); padding: 4px 0; min-width: 0; }
-  .map-controls .zoom-divider { height: 1px; background: var(--border); margin: 2px 4px; }
+
 
   /* ───────── Victory overlay ───────── */
   .victory {
@@ -727,11 +704,10 @@
 
   /* Hide UI when "Focus" mode is on */
   .focus-mode .topbar,
-  .focus-mode .legend,
-  .focus-mode .map-controls { opacity: 0; pointer-events: none; transition: opacity 0.25s; }
+  .focus-mode .legend { opacity: 0; pointer-events: none; transition: opacity 0.25s; }
 
   /* ─── Build animation ─── */
-  .topbar, .sidepanel, .legend, .map-controls {
+  .topbar, .sidepanel, .legend {
     transition: opacity 0.8s ease;
   }
   .anim-hide {
@@ -787,7 +763,8 @@
     filter: none !important;
   }
   body.anim-active .stars-row,
-  body.anim-active .star-gate-badge {
+  body.anim-active .star-gate-badge,
+  body.anim-active .xp-badge {
     opacity: 0 !important;
   }
 
@@ -972,9 +949,16 @@
 
   /* Nav */
   .quiz-nav {
-    display: flex; justify-content: flex-end;
+    display: flex; justify-content: flex-end; align-items: center; gap: 12px;
     margin-top: 28px;
   }
+  .quiz-skip {
+    appearance: none; border: none; background: none;
+    color: var(--text-faint); font-size: 13px; font-weight: 500;
+    cursor: pointer; padding: 8px 12px; border-radius: 8px;
+    transition: color 0.15s, background 0.15s;
+  }
+  .quiz-skip:hover { color: var(--text); background: rgba(255,255,255,0.06); }
   .quiz-next {
     appearance: none; border: none;
     padding: 12px 32px;
@@ -1084,8 +1068,6 @@
   @media (max-width: 767px) {
 
     /* Viewport & scrollbars */
-    .viewport::-webkit-scrollbar { display: none; }
-    .viewport { scrollbar-width: none; }
 
     /* ── Side panel → Bottom sheet ── */
     .sidepanel {
@@ -1126,48 +1108,37 @@
     .sp-cta { padding: 16px 18px; min-height: 48px; font-size: 13px; }
     .sp-resources { padding: 14px 16px; min-height: 44px; }
 
-    /* ── Top bar ── */
+    /* ── Top bar — full-width experience strip ── */
     .topbar {
-      top: env(safe-area-inset-top, 8px);
-      left: 12px; right: 12px;
-      justify-content: center;
+      top: 0; left: 0; right: 0;
+      justify-content: stretch;
+      padding-top: env(safe-area-inset-top, 0px);
+      background: rgba(13, 13, 14, 0.85);
+      backdrop-filter: blur(20px) saturate(140%);
+      -webkit-backdrop-filter: blur(20px) saturate(140%);
+      border-bottom: 1px solid var(--border);
     }
-    .progress-card { padding: 8px 12px 9px; }
-    .progress-bar { width: 100px; }
-    .progress-count { font-size: 17px; }
-    .progress-count span { font-size: 12px; }
-    .exp-next { font-size: 9px; }
+    .topbar > div { width: 100%; }
+    .progress-card.exp.glass {
+      width: 100%;
+      border-radius: 0;
+      border: none;
+      background: transparent;
+      box-shadow: none;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+      padding: 10px 16px 10px;
+      gap: 12px;
+    }
+    .progress-meta { flex-shrink: 0; }
+    .progress-bar { flex: 1; min-width: 0; width: auto; }
+    .progress-count { font-size: 18px; }
+    .progress-count span { font-size: 13px; }
+    .exp-next { font-size: 9.5px; }
 
-    /* ── Legend → collapsible ── */
-    .legend {
-      left: 12px; bottom: auto; top: 100px;
-      max-height: 0; overflow: hidden; opacity: 0;
-      padding: 0 16px;
-      transition: max-height 0.3s ease, opacity 0.25s ease, padding 0.3s ease;
-      pointer-events: none;
-    }
-    .legend.legend-open {
-      max-height: 320px; opacity: 1;
-      padding: 14px 16px;
-      pointer-events: auto;
-    }
-    .legend-toggle {
-      display: flex;
-      align-items: center; justify-content: center;
-      position: fixed; left: 12px; top: 56px;
-      z-index: 51;
-      width: 40px; height: 40px;
-      border-radius: 12px;
-      background: rgba(18, 20, 26, 0.6);
-      backdrop-filter: blur(24px) saturate(160%);
-      -webkit-backdrop-filter: blur(24px) saturate(160%);
-      border: 1px solid var(--border);
-      color: var(--text-soft);
-      font-size: 16px;
-      cursor: pointer;
-      appearance: none;
-    }
-    .legend-toggle:active { background: rgba(255,255,255,0.1); }
+    /* ── Legend & toggle — hidden on mobile ── */
+    .legend { display: none; }
+    .legend-toggle { display: none; }
 
 
     /* ── Touch-friendly nodes ── */

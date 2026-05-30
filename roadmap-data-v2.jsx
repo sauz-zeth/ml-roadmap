@@ -27,30 +27,29 @@ const DOMAIN_COLORS = {
 const ROOT_COLOR_START = '#cccdd2';
 const ROOT_COLOR_GOAL  = '#FFD60A';
 
-// Difficulty (1–5 stars) per test gate.
-// Sub-test stars sum within a domain: foundations=5, math=13, data=7,
-// classical=13, deep=21, mlops=10.  Total sub+domain stars = 84.
+// XP rewards per sub-test (100–500 range).
 const SUB_DIFFICULTY = {
-  python_core: 2, tooling: 1, cs_basics: 2,
-  calculus: 4, linalg: 3, stats: 3, prob: 3,
-  sql: 2, pydata: 2, viz: 1, data_skills: 2,
-  preproc: 2, supervised: 3, ensembles: 3, unsup: 2, evaluation: 3,
-  dl_found: 4, frameworks: 2, cnn_cv: 4, rnn_seq: 3, nlp_basics: 3, llms: 5,
-  exp_track: 2, cicd: 2, deployment: 3, monitoring: 3,
+  python_core: 200, tooling: 100, cs_basics: 200,
+  calculus: 400, linalg: 300, stats: 300, prob: 300,
+  sql: 200, pydata: 200, viz: 100, data_skills: 200,
+  preproc: 200, supervised: 300, ensembles: 300, unsup: 200, evaluation: 300,
+  dl_found: 400, frameworks: 200, cnn_cv: 400, rnn_seq: 300, nlp_basics: 300, llms: 500,
+  exp_track: 200, cicd: 200, deployment: 300, monitoring: 300,
 };
+// XP rewards per domain test (500–1000 range).
 const DOMAIN_DIFFICULTY = {
-  foundations: 3, math: 5, data: 3,
-  classical: 4,  deep: 5, mlops: 4,
+  foundations: 500, math: 750, data: 500,
+  classical: 750,  deep: 1000, mlops: 750,
 };
-// Stars required to attempt each domain test
-// (≈75% of the in-domain sub-test stars).
+// XP required to attempt each domain test
+// (≈75% of all earnable XP up to that point).
 const DOMAIN_THRESHOLD = {
-  foundations: 4,
-  math:        10,
-  data:        6,
-  classical:   11,
-  deep:        17,
-  mlops:       8,
+  foundations: 600,
+  math:        2220,
+  data:        3510,
+  classical:   5110,
+  deep:        7640,
+  mlops:       9330,
 };
 
 // ─── Quiz questions for real tests ────────────────────────────────────
@@ -621,9 +620,13 @@ const EDGES = [];
         const smd = subMaxDepth(s);
         const yOffset = (levelMaxDepth - smd) / 2;
         s.topics.forEach((topic, ti) => {
+          // XP based on hours: ≤5h→10, ≤8h→20, ≤12h→30, ≤15h→40, >15h→50
+          const h = topic.hours || 0;
+          const topicDiff = h <= 5 ? 10 : h <= 8 ? 20 : h <= 12 ? 30 : h <= 15 ? 40 : 50;
           NODES.push({
             id: topic.id, type: 'topic', tier: 'topic',
             label: topic.label, hint: topic.hint, hours: topic.hours,
+            difficulty: topicDiff,
             domain: dom.id, sub: s.id, color: dColor,
             x: xPositions[ti],
             y: subTestY + (depths[ti] + yOffset) * L.VROW,
@@ -703,10 +706,15 @@ const EDGES = [];
   LAYOUT.CANVAS_H = y + L.BOTTOM_MARGIN;
 })();
 
-// Adjacency (undirected for unlock logic)
+// Adjacency (undirected for rendering edges)
 const ADJ = {};
 NODES.forEach(n => { ADJ[n.id] = new Set(); });
 EDGES.forEach(([a, b]) => { ADJ[a].add(b); ADJ[b].add(a); });
+
+// Directed adjacency for unlock logic: a → b means completing a unlocks b (bottom-to-top)
+const ADJ_UP = {};
+NODES.forEach(n => { ADJ_UP[n.id] = new Set(); });
+EDGES.forEach(([a, b]) => { ADJ_UP[a].add(b); });
 
 const NODE_BY_ID = Object.fromEntries(NODES.map(n => [n.id, n]));
 const DOMAIN_BY_ID = Object.fromEntries(DOMAINS.map(d => [d.id, d]));
@@ -723,7 +731,7 @@ Object.assign(window, {
   LAYOUT, DOMAINS, DOMAIN_COLORS,
   SUB_DIFFICULTY, DOMAIN_DIFFICULTY, DOMAIN_THRESHOLD,
   QUIZ_DATA,
-  NODES, EDGES, ADJ,
+  NODES, EDGES, ADJ, ADJ_UP,
   NODE_BY_ID, DOMAIN_BY_ID, SUB_BY_ID,
   START_ID, GOAL_ID,
 });
