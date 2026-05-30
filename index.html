@@ -551,6 +551,7 @@
     appearance: none; border: none;
     width: 100%;
     display: flex; align-items: center; justify-content: center; gap: 8px;
+    margin-top: 10px;
     padding: 11px 16px;
     margin-bottom: 14px;
     border-radius: 12px;
@@ -1082,7 +1083,11 @@
       overflow: hidden;
     }
     .sidepanel.sheet-collapsed {
-      height: 72px;
+      height: 0;
+      padding-top: 0;
+      padding-bottom: 0;
+      border: none;
+      pointer-events: none;
     }
     .sidepanel.sheet-peek {
       height: 40dvh;
@@ -1095,10 +1100,16 @@
     .sheet-handle {
       display: block;
       width: 36px; height: 4px;
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.3);
       border-radius: 2px;
-      margin: 4px auto 12px;
+      margin: 0 auto 0;
       cursor: grab;
+      position: relative;
+    }
+    .sheet-handle::before {
+      content: '';
+      position: absolute;
+      top: -14px; left: -50vw; right: -50vw; bottom: -14px;
     }
     .sheet-handle:active { cursor: grabbing; }
     .sp-title { font-size: 22px; }
@@ -1113,25 +1124,17 @@
       top: 0; left: 0; right: 0;
       justify-content: stretch;
       padding-top: env(safe-area-inset-top, 0px);
-      background: rgba(13, 13, 14, 0.85);
-      backdrop-filter: blur(20px) saturate(140%);
-      -webkit-backdrop-filter: blur(20px) saturate(140%);
       border-bottom: 1px solid var(--border);
     }
-    .topbar > div { width: 100%; }
     .progress-card.exp.glass {
       width: 100%;
       border-radius: 0;
       border: none;
-      background: transparent;
-      box-shadow: none;
-      backdrop-filter: none;
-      -webkit-backdrop-filter: none;
       padding: 10px 16px 10px;
       gap: 12px;
     }
-    .progress-meta { flex-shrink: 0; }
-    .progress-bar { flex: 1; min-width: 0; width: auto; }
+    .progress-meta { flex-shrink: 0; width: auto; }
+    .progress-bar { flex: 1; min-width: 40px; width: auto !important; height: 8px; }
     .progress-count { font-size: 18px; }
     .progress-count span { font-size: 13px; }
     .exp-next { font-size: 9.5px; }

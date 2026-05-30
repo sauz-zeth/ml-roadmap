@@ -675,9 +675,13 @@ function App() {
   const handleNodeClick = useCallback((nodeId) => {
     if (animPhase) return;
     if (!reachable.has(nodeId)) return;
+    if (isMobile && nodeId === current && sheetMode !== 'collapsed') {
+      setSheetMode('collapsed');
+      return;
+    }
     setCurrent(nodeId);
     if (isMobile) setSheetMode('peek');
-  }, [reachable, animPhase, isMobile]);
+  }, [reachable, animPhase, isMobile, current, sheetMode]);
 
   const handleComplete = useCallback(() => {
     if (!canCompleteCur) return;
@@ -1042,13 +1046,15 @@ function App() {
     const sheet = sheetRef.current;
     if (!sheet || !isMobile) return;
     let startY = 0; let startH = 0; let dragging = false;
-    const handle = sheet.querySelector('.sheet-handle');
-    if (!handle) return;
-    const snapHeights = { collapsed: 72, peek: window.innerHeight * 0.4, expanded: window.innerHeight * 0.85 };
+    const snapHeights = { collapsed: 0, peek: window.innerHeight * 0.4, expanded: window.innerHeight * 0.85 };
     const onStart = (e) => {
       if (e.touches.length !== 1) return;
+      // Only drag from top 60px of sheet (handle area)
+      const touchY = e.touches[0].clientY;
+      const sheetTop = sheet.getBoundingClientRect().top;
+      if (touchY - sheetTop > 60) return;
       dragging = true;
-      startY = e.touches[0].clientY;
+      startY = touchY;
       startH = sheet.offsetHeight;
       sheet.style.transition = 'none';
     };
@@ -1056,7 +1062,7 @@ function App() {
       if (!dragging) return;
       e.preventDefault();
       const dy = startY - e.touches[0].clientY;
-      const newH = Math.max(snapHeights.collapsed, Math.min(snapHeights.expanded, startH + dy));
+      const newH = Math.max(0, Math.min(snapHeights.expanded, startH + dy));
       sheet.style.height = newH + 'px';
     };
     const onEnd = () => {
@@ -1064,19 +1070,19 @@ function App() {
       dragging = false;
       sheet.style.transition = '';
       const h = sheet.offsetHeight;
-      const mid1 = (snapHeights.collapsed + snapHeights.peek) / 2;
-      const mid2 = (snapHeights.peek + snapHeights.expanded) / 2;
-      if (h < mid1) { setSheetMode('collapsed'); sheet.style.height = ''; }
-      else if (h < mid2) { setSheetMode('peek'); sheet.style.height = ''; }
+      // Snap: if dragged below 36px → collapse (hide)
+      if (h < 36) { setSheetMode('collapsed'); sheet.style.height = ''; }
+      else if (h < (snapHeights.peek + snapHeights.collapsed) / 2 + 36) { setSheetMode('peek'); sheet.style.height = ''; }
+      else if (h < (snapHeights.peek + snapHeights.expanded) / 2) { setSheetMode('peek'); sheet.style.height = ''; }
       else { setSheetMode('expanded'); sheet.style.height = ''; }
     };
-    handle.addEventListener('touchstart', onStart, { passive: true });
-    handle.addEventListener('touchmove', onMove, { passive: false });
-    handle.addEventListener('touchend', onEnd);
+    sheet.addEventListener('touchstart', onStart, { passive: true });
+    sheet.addEventListener('touchmove', onMove, { passive: false });
+    sheet.addEventListener('touchend', onEnd);
     return () => {
-      handle.removeEventListener('touchstart', onStart);
-      handle.removeEventListener('touchmove', onMove);
-      handle.removeEventListener('touchend', onEnd);
+      sheet.removeEventListener('touchstart', onStart);
+      sheet.removeEventListener('touchmove', onMove);
+      sheet.removeEventListener('touchend', onEnd);
     };
   }, [isMobile]);
 
@@ -1206,11 +1212,6 @@ function App() {
           </div>
         )}
         <div className="sp-hint">{currentNode.hint}</div>
-        {currentNode.type === 'topic' && (
-          <button className="sp-resources" onClick={() => {}}>
-            Free {currentNode.label} courses & guides
-          </button>
-        )}
         {currentNode.difficulty && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
             <div style={{ fontSize: 10.5, letterSpacing: '0.14em', color: 'var(--text-faint)', textTransform: 'uppercase', fontWeight: 600 }}>Reward</div>
@@ -1239,6 +1240,11 @@ function App() {
           }
           return <button className="sp-cta locked" disabled>{isCurStarGated ? 'Need more experience' : 'Locked'}</button>;
         })()}
+        {currentNode.type === 'topic' && (
+          <button className="sp-resources" onClick={() => {}}>
+            Free {currentNode.label} courses & guides
+          </button>
+        )}
         {!isMobile && (
           <div className="sp-foot">
             <span className="kbd">space</span>
